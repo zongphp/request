@@ -4,32 +4,26 @@ namespace zongphp\request;
 //请求处理
 use zongphp\request\build\Base;
 
-class Request {
-	protected $link;
+class Request
+{
+    protected static $link;
 
-	protected function driver() {
-		$this->link = new Base();
-		return $this;
-	}
+    public static function single()
+    {
+        if ( ! self::$link) {
+            self::$link = new Base();
+        }
 
-	public function __call( $method, $params ) {
-		if ( is_null( $this->link ) ) {
-			$this->driver();
-		}
+        return self::$link;
+    }
 
-		return call_user_func_array( [ $this->link, $method ], $params );
-	}
+    public function __call($method, $params)
+    {
+        return call_user_func_array([self::single(), $method], $params);
+    }
 
-	public static function single() {
-		static $link;
-		if ( is_null( $link ) ) {
-			$link = new static();
-		}
-
-		return $link;
-	}
-
-	public static function __callStatic( $name, $arguments ) {
-		return call_user_func_array( [ static::single(), $name ], $arguments );
-	}
+    public static function __callStatic($name, $arguments)
+    {
+        return call_user_func_array([self::single(), $name], $arguments);
+    }
 }

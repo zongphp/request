@@ -1,18 +1,18 @@
 {
   "name": "zongphp/request",
   "description": "客户端请求处理组件",
-  "type": "project",
   "keywords": [
+    "zongphp",
     "request"
   ],
   "license": "MIT",
   "minimum-stability": "stable",
   "require": {
     "php": ">=5.4.0",
-    "zongphp/session": "~1.0",
-    "zongphp/cookie": "~1.0",
-    "zongphp/arr": "~1.0",
-    "zongphp/tool": "~1.0"
+    "zongphp/session": "~2.0",
+    "zongphp/cookie": "~2.0",
+    "zongphp/arr": "~2.0",
+    "zongphp/tool": "~2.0"
   },
   "autoload": {
     "files": [
