@@ -42,7 +42,7 @@ class Base {
 			defined( 'IS_MOBILE' ) or define( 'IS_MOBILE', $this->isMobile() );
 			defined( '__ROOT__' ) or define( '__ROOT__', PHP_SAPI == 'cli' ? '' : trim( 'http://' . $_SERVER['HTTP_HOST'] . dirname( $_SERVER['SCRIPT_NAME'] ), '/\\' ) );
 			defined( '__WEB__' ) or define( '__WEB__', Config::get( 'http.rewrite' ) ? __ROOT__ : __ROOT__ . '/index.php' );
-			defined( '__URL__' ) or define( '__URL__', trim( 'http://' . $_SERVER['HTTP_HOST'] . '/' . trim( $_SERVER['REQUEST_URI'], '/\\' ), '/' ) );
+			defined( '__URL__' ) or define( '__URL__', trim( $this->httpType() . $_SERVER['HTTP_HOST'] . '/' . trim( $_SERVER['REQUEST_URI'], '/\\' ), '/' ) );
 			defined( '__HISTORY__' ) or define( "__HISTORY__", isset( $_SERVER["HTTP_REFERER"] ) ? $_SERVER["HTTP_REFERER"] : '' );
 		}
 		$this->items['SESSION'] = Session::all();
@@ -174,6 +174,15 @@ class Base {
 		}
 
 		return false;
+	}
+	
+	//返回http类型
+	public function httpType(){
+		if($this->isHttps()){
+			return 'https://';
+		}else{
+			return 'http://';
+		}
 	}
 
 	//微信客户端检测
