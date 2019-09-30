@@ -9,7 +9,19 @@ use zongphp\session\Session;
 
 class Base {
 	protected $items = [];
-
+	/**
+     * @var string URL地址
+     */
+    protected $url;
+	/**
+     * @var string 基础URL
+     */
+    protected $baseUrl;
+	/**
+     * @var array 当前路由信息
+     */
+    protected $routeInfo = [];
+	
 	//启动组件
 	public function __construct() {
 		defined( 'IS_CLI' ) or define( 'IS_CLI', PHP_SAPI == 'cli' );
@@ -184,6 +196,176 @@ class Base {
 			return 'http://';
 		}
 	}
+	
+	    /**
+     * 设置或获取当前完整URL 包括QUERY_STRING
+     * @access public
+     * @param string|true $url URL地址 true 带域名获取
+     * @return string
+     */
+    public function url($url = null)
+    {
+        if (!is_null($url) && true !== $url) {
+            $this->url = $url;
+            return $this;
+        } elseif (!$this->url) {
+            if (IS_CLI) {
+                $this->url = isset($_SERVER['argv'][1]) ? $_SERVER['argv'][1] : '';
+            } elseif (isset($_SERVER['HTTP_X_REWRITE_URL'])) {
+                $this->url = $_SERVER['HTTP_X_REWRITE_URL'];
+            } elseif (isset($_SERVER['REQUEST_URI'])) {
+                $this->url = $_SERVER['REQUEST_URI'];
+            } elseif (isset($_SERVER['ORIG_PATH_INFO'])) {
+                $this->url = $_SERVER['ORIG_PATH_INFO'] . (!empty($_SERVER['QUERY_STRING']) ? '?' . $_SERVER['QUERY_STRING'] : '');
+            } else {
+                $this->url = '';
+            }
+        }
+        return true === $url ? $this->domain() . $this->url : $this->url;
+    }
+	
+	/**
+     * 设置或获取当前URL 不含QUERY_STRING
+     * @access public
+     * @param string $url URL地址
+     * @return string
+     */
+    public function baseUrl($url = null)
+    {
+        if (!is_null($url) && true !== $url) {
+            $this->baseUrl = $url;
+            return $this;
+        } elseif (!$this->baseUrl) {
+            $str           = $this->url();
+            $this->baseUrl = strpos($str, '?') ? strstr($str, '?', true) : $str;
+        }
+        return true === $url ? $this->domain() . $this->baseUrl : $this->baseUrl;
+    }
+
+    /**
+     * 设置或获取当前包含协议的域名
+     * @access public
+     * @param string $domain 域名
+     * @return string
+     */
+    public function domain($domain = null)
+    {
+        if (!is_null($domain)) {
+            return $domain;
+        } else {
+            $domain = $this->scheme() . '://' . $this->host();
+        }
+        return $domain;
+    }
+
+        /**
+     * 当前请求的host
+     * @access public
+     * @param bool $strict true 仅仅获取HOST
+     * @return string
+     */
+    public function host($strict = false)
+    {
+        if (isset($_SERVER['HTTP_X_REAL_HOST'])) {
+            $host = $_SERVER['HTTP_X_REAL_HOST'];
+        } else {
+            $host =$_SERVER['HTTP_HOST'];
+        }
+
+        return true === $strict && strpos($host, ':') ? strstr($host, ':', true) : $host;
+    }
+
+    /**
+     * 当前URL地址中的scheme参数
+     * @access public
+     * @return string
+     */
+    public function scheme()
+    {
+        return $this->isHttps() ? 'https' : 'http';
+    }
+	
+	/**
+     * 设置或者获取当前的Header
+     * @access public
+     * @param string|array $name    header名称
+     * @param string       $default 默认值
+     * @return string
+     */
+    public function header($name = '', $default = null)
+    {
+        $header = [];
+        if (function_exists('apache_request_headers') && $result = apache_request_headers()) {
+            $header = $result;
+        } else {
+            $server = $_SERVER;
+            foreach ($server as $key => $val) {
+                if (0 === strpos($key, 'HTTP_')) {
+                    $key          = str_replace('_', '-', strtolower(substr($key, 5)));
+                    $header[$key] = $val;
+                }
+            }
+            if (isset($server['CONTENT_TYPE'])) {
+                $header['content-type'] = $server['CONTENT_TYPE'];
+            }
+            if (isset($server['CONTENT_LENGTH'])) {
+                $header['content-length'] = $server['CONTENT_LENGTH'];
+            }
+        }
+        $header = array_change_key_case($header);
+
+        if (is_array($name)) {
+            return $header = array_merge($header, $name);
+        }
+        if ('' === $name) {
+            return $header;
+        }
+        $name = str_replace('_', '-', strtolower($name));
+        return isset($header[$name]) ? $header[$name] : $default;
+    }
+	
+	/**
+     * 获取当前请求的路由信息
+     * @access public
+     * @param array $route 路由名称
+     * @return array
+     */
+    public function routeInfo()
+    {
+        $route = Route::getMatchRoute();
+        
+        $this->routeInfo = $route;
+
+        return $this->routeInfo;
+    }
+	
+	/**
+     * 获取当前请求的路由规则
+     * @access public
+     * @param array $route 路由名称
+     * @return array
+     */
+    public function routeRule()
+    {
+        $routeInfo = $this->routeInfo();
+        if (!empty($routeInfo)) {
+            $routeRule = explode('/', $routeInfo['route']);
+            return $routeRule;
+        } else {
+            return [];
+        }
+    }
+	
+	 /**
+     * 获取当前请求的时间
+     * @access public
+     * @param bool $float 是否使用浮点类型
+     * @return integer|float
+     */
+    public function time($float = false)
+    {
+        return $float ? $_SERVER['REQUEST_TIME_FLOAT'] : $_SERVER['REQUEST_TIME'];
+    }
 
 	//微信客户端检测
 	public function isWeChat() {
