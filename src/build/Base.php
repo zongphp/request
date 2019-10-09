@@ -6,9 +6,37 @@ use zongphp\arr\Arr;
 use zongphp\config\Config;
 use zongphp\cookie\Cookie;
 use zongphp\session\Session;
+use app\base\system\File;
 
 class Base {
 	protected $items = [];
+
+	/**
+     * 配置参数
+     * @var array
+     */
+    protected $config = [
+        // 表单请求类型伪装变量
+        'var_method'       => '_method',
+        // 表单ajax伪装变量
+        'var_ajax'         => '_ajax',
+        // 表单pjax伪装变量
+        'var_pjax'         => '_pjax',
+        // PATHINFO变量名 用于兼容模式
+        'var_pathinfo'     => 's',
+        // 兼容PATH_INFO获取
+        'pathinfo_fetch'   => ['ORIG_PATH_INFO', 'REDIRECT_PATH_INFO', 'REDIRECT_URL'],
+        // 默认全局过滤方法 用逗号分隔多个
+        'default_filter'   => '',
+        // 域名根，如zongphp.com
+        'url_domain_root'  => '',
+        // HTTPS代理标识
+        'https_agent_name' => '',
+        // IP代理获取标识
+        'http_agent_ip'    => 'HTTP_X_REAL_IP',
+        // URL伪静态后缀
+        'url_html_suffix'  => 'html',
+    ];
 	/**
      * @var string URL地址
      */
@@ -20,10 +48,83 @@ class Base {
 	/**
      * @var array 当前路由信息
      */
-    protected $routeInfo = [];
+	protected $routeInfo = [];
+	
+	/**
+     * 当前FILE参数
+     * @var array
+     */
+    protected $file = [];
+	
+	/**
+     * 当前请求参数
+     * @var array
+     */
+	protected $param = [];
+	
+	/**
+     * 当前GET参数
+     * @var array
+     */
+    protected $get = [];
+
+    /**
+     * 当前POST参数
+     * @var array
+     */
+	protected $post = [];
+	
+	/**
+     * 当前ROUTE参数
+     * @var array
+     */
+    protected $route = [];
+
+	/**
+     * 请求类型
+     * @var string
+     */
+	protected $method;
+	
+	/**
+     * php://input内容
+     * @var string
+     */
+	protected $input;
+
+	/**
+     * 资源类型定义
+     * @var array
+     */
+    protected $mimeType = [
+        'xml'   => 'application/xml,text/xml,application/x-xml',
+        'json'  => 'application/json,text/x-json,application/jsonrequest,text/json',
+        'js'    => 'text/javascript,application/javascript,application/x-javascript',
+        'css'   => 'text/css',
+        'rss'   => 'application/rss+xml',
+        'yaml'  => 'application/x-yaml,text/yaml',
+        'atom'  => 'application/atom+xml',
+        'pdf'   => 'application/pdf',
+        'text'  => 'text/plain',
+        'image' => 'image/png,image/jpg,image/jpeg,image/pjpeg,image/gif,image/webp,image/*',
+        'csv'   => 'text/csv',
+        'html'  => 'text/html,application/xhtml+xml,*/*',
+	];
+	
+	/**
+     * 全局过滤规则
+     * @var array
+     */
+	protected $filter;
+
+	/**
+     * 是否合并Param
+     * @var bool
+     */
+    protected $mergeParam = false;
 	
 	//启动组件
-	public function __construct() {
+	public function __construct(array $options = []) {
 		defined( 'IS_CLI' ) or define( 'IS_CLI', PHP_SAPI == 'cli' );
 		$this->items['POST']    = $_POST;
 		$this->items['GET']     = $_GET;
@@ -59,7 +160,21 @@ class Base {
 		}
 		$this->items['SESSION'] = Session::all();
 		$this->items['COOKIE']  = Cookie::all();
+
+		$this->init($options);
+
+        // 保存 php://input
+        $this->input = file_get_contents('php://input');
 	}
+
+	public function init(array $options = [])
+    {
+        $this->config = array_merge($this->config, $options);
+
+        if (is_null($this->filter) && !empty($this->config['default_filter'])) {
+            $this->filter = $this->config['default_filter'];
+        }
+    }
 
 	/**
 	 * 是否为异步提交
@@ -365,8 +480,564 @@ class Base {
     public function time($float = false)
     {
         return $float ? $_SERVER['REQUEST_TIME_FLOAT'] : $_SERVER['REQUEST_TIME'];
+	}
+	
+	/**
+     * 获取server参数
+     * @access public
+     * @param  string        $name 数据名称
+     * @param  string        $default 默认值
+     * @return mixed
+     */
+    public function server($name = '', $default = null)
+    {
+        if (empty($name)) {
+            return $_SERVER;
+        } else {
+            $name = strtoupper($name);
+        }
+
+        return isset($_SERVER[$name]) ? $_SERVER[$name] : $default;
+	}
+	
+	/**
+     * 递归重置数组指针
+     * @access public
+     * @param array $data 数据源
+     * @return void
+     */
+    public function arrayReset(array &$data)
+    {
+        foreach ($data as &$value) {
+            if (is_array($value)) {
+                $this->arrayReset($value);
+            }
+        }
+        reset($data);
+	}
+	
+	/**
+     * 获取变量 支持过滤和默认值
+     * @access public
+     * @param  array         $data 数据源
+     * @param  string|false  $name 字段名
+     * @param  mixed         $default 默认值
+     * @param  string|array  $filter 过滤函数
+     * @return mixed
+     */
+    public function input($data = [], $name = '', $default = null, $filter = '')
+    {
+        if (false === $name) {
+            // 获取原始数据
+            return $data;
+        }
+
+        $name = (string) $name;
+        if ('' != $name) {
+            // 解析name
+            if (strpos($name, '/')) {
+                list($name, $type) = explode('/', $name);
+            }
+
+            $data = $this->getData($data, $name);
+
+            if (is_null($data)) {
+                return $default;
+            }
+
+            if (is_object($data)) {
+                return $data;
+            }
+        }
+
+        // 解析过滤器
+        $filter = $this->getFilter($filter, $default);
+
+        if (is_array($data)) {
+            array_walk_recursive($data, [$this, 'filterValue'], $filter);
+            if (version_compare(PHP_VERSION, '7.1.0', '<')) {
+                // 恢复PHP版本低于 7.1 时 array_walk_recursive 中消耗的内部指针
+                $this->arrayReset($data);
+            }
+        } else {
+            $this->filterValue($data, $name, $filter);
+        }
+
+        if (isset($type) && $data !== $default) {
+            // 强制类型转换
+            $this->typeCast($data, $type);
+        }
+
+        return $data;
     }
 
+    /**
+     * 获取数据
+     * @access public
+     * @param  array         $data 数据源
+     * @param  string|false  $name 字段名
+     * @return mixed
+     */
+    protected function getData(array $data, $name)
+    {
+        foreach (explode('.', $name) as $val) {
+            if (isset($data[$val])) {
+                $data = $data[$val];
+            } else {
+                return;
+            }
+        }
+
+        return $data;
+	}
+	
+	/**
+     * 设置或获取当前的过滤规则
+     * @access public
+     * @param  mixed $filter 过滤规则
+     * @return mixed
+     */
+    public function filter($filter = null)
+    {
+        if (is_null($filter)) {
+            return $this->filter;
+        }
+
+        $this->filter = $filter;
+    }
+
+    protected function getFilter($filter, $default)
+    {
+        if (is_null($filter)) {
+            $filter = [];
+        } else {
+            $filter = $filter ?: $this->filter;
+            if (is_string($filter) && false === strpos($filter, '/')) {
+                $filter = explode(',', $filter);
+            } else {
+                $filter = (array) $filter;
+            }
+        }
+
+        $filter[] = $default;
+
+        return $filter;
+    }
+
+    /**
+     * 递归过滤给定的值
+     * @access public
+     * @param  mixed     $value 键值
+     * @param  mixed     $key 键名
+     * @param  array     $filters 过滤方法+默认值
+     * @return mixed
+     */
+    private function filterValue(&$value, $key, $filters)
+    {
+        $default = array_pop($filters);
+
+        foreach ($filters as $filter) {
+            if (is_callable($filter)) {
+                // 调用函数或者方法过滤
+                $value = call_user_func($filter, $value);
+            } elseif (is_scalar($value)) {
+                if (false !== strpos($filter, '/')) {
+                    // 正则过滤
+                    if (!preg_match($filter, $value)) {
+                        // 匹配不成功返回默认值
+                        $value = $default;
+                        break;
+                    }
+                } elseif (!empty($filter)) {
+                    // filter函数不存在时, 则使用filter_var进行过滤
+                    // filter为非整形值时, 调用filter_id取得过滤id
+                    $value = filter_var($value, is_int($filter) ? $filter : filter_id($filter));
+                    if (false === $value) {
+                        $value = $default;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return $value;
+    }
+
+    /**
+     * 强制类型转换
+     * @access public
+     * @param  string $data
+     * @param  string $type
+     * @return mixed
+     */
+    private function typeCast(&$data, $type)
+    {
+        switch (strtolower($type)) {
+            // 数组
+            case 'a':
+                $data = (array) $data;
+                break;
+            // 数字
+            case 'd':
+                $data = (int) $data;
+                break;
+            // 浮点
+            case 'f':
+                $data = (float) $data;
+                break;
+            // 布尔
+            case 'b':
+                $data = (boolean) $data;
+                break;
+            // 字符串
+            case 's':
+                if (is_scalar($data)) {
+                    $data = (string) $data;
+                } else {
+                    throw new \InvalidArgumentException('variable type error：' . gettype($data));
+                }
+                break;
+        }
+	}
+
+	/**
+     * 是否存在某个请求参数
+     * @access public
+     * @param  string    $name 变量名
+     * @param  string    $type 变量类型
+     * @param  bool      $checkEmpty 是否检测空值
+     * @return mixed
+     */
+    public function has($name, $type = 'param', $checkEmpty = false)
+    {
+        if (!in_array($type, ['param', 'get', 'post', 'request', 'put', 'patch', 'file', 'session', 'cookie', 'env', 'header', 'route'])) {
+            return false;
+        }
+
+        if (empty($this->$type)) {
+            $param = $this->$type();
+        } else {
+            $param = $this->$type;
+        }
+
+        // 按.拆分成多维数组进行判断
+        foreach (explode('.', $name) as $val) {
+            if (isset($param[$val])) {
+                $param = $param[$val];
+            } else {
+                return false;
+            }
+        }
+
+        return ($checkEmpty && '' === $param) ? false : true;
+    }
+	
+	/**
+     * 当前请求的资源类型
+     * @access public
+     * @return false|string
+     */
+    public function type()
+    {
+        $accept = $this->server('HTTP_ACCEPT');
+
+        if (empty($accept)) {
+            return false;
+        }
+
+        foreach ($this->mimeType as $key => $val) {
+            $array = explode(',', $val);
+            foreach ($array as $k => $v) {
+                if (stristr($accept, $v)) {
+                    return $key;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 设置资源类型
+     * @access public
+     * @param  string|array  $type 资源类型名
+     * @param  string        $val 资源类型
+     * @return void
+     */
+    public function mimeType($type, $val = '')
+    {
+        if (is_array($type)) {
+            $this->mimeType = array_merge($this->mimeType, $type);
+        } else {
+            $this->mimeType[$type] = $val;
+        }
+	}
+	
+	/**
+     * 当前的请求类型
+     * @access public
+     * @param  bool $origin  是否获取原始请求类型
+     * @return string
+     */
+    public function method($origin = false)
+    {
+        if ($origin) {
+            // 获取原始请求类型
+            return $this->server('REQUEST_METHOD') ?: 'GET';
+        } elseif (!$this->method) {
+            if (isset($_POST[$this->config['var_method']])) {
+                $method = strtolower($_POST[$this->config['var_method']]);
+                if (in_array($method, ['get', 'post', 'put', 'patch', 'delete'])) {
+                    $this->method    = strtoupper($method);
+                    $this->{$method} = $_POST;
+                } else {
+                    $this->method = 'POST';
+                }
+                unset($_POST[$this->config['var_method']]);
+            } elseif ($this->server('HTTP_X_HTTP_METHOD_OVERRIDE')) {
+                $this->method = strtoupper($this->server('HTTP_X_HTTP_METHOD_OVERRIDE'));
+            } else {
+                $this->method = $this->server('REQUEST_METHOD') ?: 'GET';
+            }
+        }
+
+        return $this->method;
+	}
+	
+	    /**
+     * 获取当前请求的参数
+     * @access public
+     * @param  mixed         $name 变量名
+     * @param  mixed         $default 默认值
+     * @param  string|array  $filter 过滤方法
+     * @return mixed
+     */
+    public function param($name = '', $default = null, $filter = '')
+    {
+        if (!$this->mergeParam) {
+            $method = $this->method(true);
+
+            // 自动获取请求变量
+            switch ($method) {
+                case 'POST':
+                    $vars = $this->_post(false);
+                    break;
+                case 'PUT':
+                case 'DELETE':
+                case 'PATCH':
+                    $vars = $this->put(false);
+                    break;
+                default:
+                    $vars = [];
+            }
+
+            // 当前请求参数和URL地址中的参数合并
+            $this->param = array_merge($this->param, $this->_get(false), $vars, $this->_route(false));
+
+            $this->mergeParam = true;
+        }
+
+        if (true === $name) {
+            // 获取包含文件上传信息的数组
+            $file = $this->file();
+            $data = is_array($file) ? array_merge($this->param, $file) : $this->param;
+
+            return $this->input($data, '', $default, $filter);
+        }
+
+        return $this->input($this->param, $name, $default, $filter);
+	}
+	
+	/**
+     * 获取路由参数
+     * @access public
+     * @param  string|false  $name 变量名
+     * @param  mixed         $default 默认值
+     * @param  string|array  $filter 过滤方法
+     * @return mixed
+     */
+    public function _route($name = '', $default = null, $filter = '')
+    {
+        return $this->input($this->route, $name, $default, $filter);
+    }
+
+    /**
+     * 获取GET参数
+     * @access public
+     * @param  string|false  $name 变量名
+     * @param  mixed         $default 默认值
+     * @param  string|array  $filter 过滤方法
+     * @return mixed
+     */
+    public function _get($name = '', $default = null, $filter = '')
+    {
+        if (empty($this->get)) {
+            $this->get = $_GET;
+        }
+
+        return $this->input($this->get, $name, $default, $filter);
+	}
+
+	/**
+     * 获取POST参数
+     * @access public
+     * @param  string|false  $name 变量名
+     * @param  mixed         $default 默认值
+     * @param  string|array  $filter 过滤方法
+     * @return mixed
+     */
+    public function _post($name = '', $default = null, $filter = '')
+    {
+        if (empty($this->post)) {
+            $this->post = !empty($_POST) ? $_POST : $this->getInputData($this->input);
+        }
+
+        return $this->input($this->post, $name, $default, $filter);
+	}
+	
+	protected function getInputData($content)
+    {
+        if ($this->isJson()) {
+            return (array) json_decode($content, true);
+        } elseif (strpos($content, '=')) {
+            parse_str($content, $data);
+            return $data;
+        }
+
+        return [];
+	}
+	
+	/**
+     * 获取上传的文件信息
+     * @access public
+     * @param  string   $name 名称
+     * @return null|array|\zongphp\File
+     */
+    public function file($name = '')
+    {
+        if (empty($this->file)) {
+            $this->file = isset($_FILES) ? $_FILES : [];
+        }
+
+        $files = $this->file;
+        if (!empty($files)) {
+            if (strpos($name, '.')) {
+                list($name, $sub) = explode('.', $name);
+            }
+
+            // 处理上传文件
+            $array = $this->dealUploadFile($files, $name);
+
+            if ('' === $name) {
+                // 获取全部文件
+                return $array;
+            } elseif (isset($sub) && isset($array[$name][$sub])) {
+                return $array[$name][$sub];
+            } elseif (isset($array[$name])) {
+                return $array[$name];
+            }
+        }
+
+        return;
+    }
+
+    protected function dealUploadFile($files, $name)
+    {
+        $array = [];
+        foreach ($files as $key => $file) {
+            if ($file instanceof File) {
+                $array[$key] = $file;
+            } elseif (is_array($file['name'])) {
+                $item  = [];
+                $keys  = array_keys($file);
+                $count = count($file['name']);
+
+                for ($i = 0; $i < $count; $i++) {
+                    if ($file['error'][$i] > 0) {
+                        if ($name == $key) {
+                            $this->throwUploadFileError($file['error'][$i]);
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    $temp['key'] = $key;
+
+                    foreach ($keys as $_key) {
+                        $temp[$_key] = $file[$_key][$i];
+                    }
+
+                    $item[] = (new File($temp['tmp_name']))->setUploadInfo($temp);
+                }
+
+                $array[$key] = $item;
+            } else {
+                if ($file['error'] > 0) {
+                    if ($key == $name) {
+                        $this->throwUploadFileError($file['error']);
+                    } else {
+                        continue;
+                    }
+                }
+
+                $array[$key] = (new File($file['tmp_name']))->setUploadInfo($file);
+            }
+        }
+
+        return $array;
+    }
+
+    protected function throwUploadFileError($error)
+    {
+        static $fileUploadErrors = [
+            1 => 'upload File size exceeds the maximum value',
+            2 => 'upload File size exceeds the maximum value',
+            3 => 'only the portion of file is uploaded',
+            4 => 'no file to uploaded',
+            6 => 'upload temp dir not found',
+            7 => 'file write error',
+        ];
+
+        $msg = $fileUploadErrors[$error];
+
+        throw new \app\base\system\Exception($msg);
+    }
+	
+	/**
+     * 当前请求 HTTP_CONTENT_TYPE
+     * @access public
+     * @return string
+     */
+    public function contentType()
+    {
+        $contentType = $this->server('CONTENT_TYPE');
+
+        if ($contentType) {
+            if (strpos($contentType, ';')) {
+                list($type) = explode(';', $contentType);
+            } else {
+                $type = $contentType;
+            }
+            return trim($type);
+        }
+
+        return '';
+    }
+
+
+	/**
+     * 当前是否JSON请求
+     * @access public
+     * @return bool
+     */
+    public function isJson()
+    {
+        $contentType = $this->contentType();
+        $acceptType  = $this->type();
+
+        return false !== strpos($contentType, 'json') || false !== strpos($acceptType, 'json');
+	}
+	
 	//微信客户端检测
 	public function isWeChat() {
 		return isset( $_SERVER['HTTP_USER_AGENT'] ) && strpos( $_SERVER['HTTP_USER_AGENT'], 'MicroMessenger' ) !== false;
