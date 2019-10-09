@@ -112,6 +112,12 @@ class Base {
 	];
 	
 	/**
+     * 当前请求内容
+     * @var string
+     */
+	protected $content;
+	
+	/**
      * 全局过滤规则
      * @var array
      */
@@ -177,12 +183,43 @@ class Base {
     }
 
 	/**
-	 * 是否为异步提交
-	 * @return bool
-	 */
-	public function isAjax() {
-		return isset( $_SERVER['HTTP_X_REQUESTED_WITH'] ) && strtolower( $_SERVER['HTTP_X_REQUESTED_WITH'] ) == 'xmlhttprequest';
-	}
+     * 当前是否Ajax请求
+     * @access public
+     * @param  bool $ajax  true 获取原始ajax请求
+     * @return bool
+     */
+    public function isAjax($ajax = false)
+    {
+        $value  = $this->server('HTTP_X_REQUESTED_WITH');
+        $result = 'xmlhttprequest' == strtolower($value) ? true : false;
+
+        if (true === $ajax) {
+            return $result;
+        }
+
+        $result           = $this->param($this->config['var_ajax']) ? true : $result;
+        $this->mergeParam = false;
+        return $result;
+    }
+
+    /**
+     * 当前是否Pjax请求
+     * @access public
+     * @param  bool $pjax  true 获取原始pjax请求
+     * @return bool
+     */
+    public function isPjax($pjax = false)
+    {
+        $result = !is_null($this->server('HTTP_X_PJAX')) ? true : false;
+
+        if (true === $pjax) {
+            return $result;
+        }
+
+        $result           = $this->param($this->config['var_pjax']) ? true : $result;
+        $this->mergeParam = false;
+        return $result;
+    }
 
 	/**
 	 * 获取数据
@@ -249,36 +286,58 @@ class Base {
 		return ! is_null( $data ) ? $data : ( isset( $arguments[1] ) ? $arguments[1] : null );
 	}
 
-	//客户端IP
-	public function ip( $type = 0 ) {
-		$type = intval( $type );
-		//保存客户端IP地址
-		if ( isset( $_SERVER ) ) {
-			if ( isset( $_SERVER["HTTP_X_FORWARDED_FOR"] ) ) {
-				$ip = $_SERVER["HTTP_X_FORWARDED_FOR"];
-			} else if ( isset( $_SERVER["HTTP_CLIENT_IP"] ) ) {
-				$ip = $_SERVER["HTTP_CLIENT_IP"];
-			} else if ( isset( $_SERVER["REMOTE_ADDR"] ) ) {
-				$ip = $_SERVER["REMOTE_ADDR"];
-			} else {
-				return '';
-			}
-		} else {
-			if ( getenv( "HTTP_X_FORWARDED_FOR" ) ) {
-				$ip = getenv( "HTTP_X_FORWARDED_FOR" );
-			} else if ( getenv( "HTTP_CLIENT_IP" ) ) {
-				$ip = getenv( "HTTP_CLIENT_IP" );
-			} else if ( getenv( "REMOTE_ADDR" ) ) {
-				$ip = getenv( "REMOTE_ADDR" );
-			} else {
-				return '';
-			}
-		}
-		$long     = ip2long( $ip );
-		$clientIp = $long ? [ $ip, $long ] : [ "0.0.0.0", 0 ];
+	    /**
+     * 获取客户端IP地址
+     * @access public
+     * @param  integer   $type 返回类型 0 返回IP地址 1 返回IPV4地址数字
+     * @param  boolean   $adv 是否进行高级模式获取（有可能被伪装）
+     * @return mixed
+     */
+    public function ip($type = 0, $adv = true)
+    {
+        $type      = $type ? 1 : 0;
+        static $ip = null;
 
-		return $clientIp[ $type ];
-	}
+        if (null !== $ip) {
+            return $ip[$type];
+        }
+
+        $httpAgentIp = $this->config['http_agent_ip'];
+
+        if ($httpAgentIp && $this->server($httpAgentIp)) {
+            $ip = $this->server($httpAgentIp);
+        } elseif ($adv) {
+            if ($this->server('HTTP_X_FORWARDED_FOR')) {
+                $arr = explode(',', $this->server('HTTP_X_FORWARDED_FOR'));
+                $pos = array_search('unknown', $arr);
+                if (false !== $pos) {
+                    unset($arr[$pos]);
+                }
+                $ip = trim(current($arr));
+            } elseif ($this->server('HTTP_CLIENT_IP')) {
+                $ip = $this->server('HTTP_CLIENT_IP');
+            } elseif ($this->server('REMOTE_ADDR')) {
+                $ip = $this->server('REMOTE_ADDR');
+            }
+        } elseif ($this->server('REMOTE_ADDR')) {
+            $ip = $this->server('REMOTE_ADDR');
+        }
+
+        // IP地址类型
+        $ip_mode = (strpos($ip, ':') === false) ? 'ipv4' : 'ipv6';
+
+        // IP地址合法验证
+        if (filter_var($ip, FILTER_VALIDATE_IP) !== $ip) {
+            $ip = ('ipv4' === $ip_mode) ? '0.0.0.0' : '::';
+        }
+
+        // 如果是ipv4地址，则直接使用ip2long返回int类型ip；如果是ipv6地址，暂时不支持，直接返回0
+        $long_ip = ('ipv4' === $ip_mode) ? sprintf("%u", ip2long($ip)) : 0;
+
+        $ip = [$ip, $long_ip];
+
+        return $ip[$type];
+    }
 
 	//判断请求来源是否为本网站域名
 	public function isDomain() {
@@ -397,7 +456,7 @@ class Base {
      */
     public function scheme()
     {
-        return $this->isHttps() ? 'https' : 'http';
+        return $this->isSsl() ? 'https' : 'http';
     }
 	
 	/**
@@ -469,6 +528,30 @@ class Base {
         } else {
             return [];
         }
+	}
+	
+	/**
+     * 设置或者获取当前请求的content
+     * @access public
+     * @return string
+     */
+    public function getContent()
+    {
+        if (is_null($this->content)) {
+            $this->content = $this->input;
+        }
+
+        return $this->content;
+    }
+
+    /**
+     * 获取当前请求的php://input
+     * @access public
+     * @return string
+     */
+    public function getInput()
+    {
+        return $this->input;
     }
 	
 	 /**
@@ -1022,6 +1105,72 @@ class Base {
         }
 
         return '';
+	}
+	
+	/**
+     * 排除指定参数获取
+     * @access public
+     * @param  string|array  $name 变量名
+     * @param  string        $type 变量类型
+     * @return mixed
+     */
+    public function except($name, $type = 'param')
+    {
+        $param = $this->$type();
+        if (is_string($name)) {
+            $name = explode(',', $name);
+        }
+
+        foreach ($name as $key) {
+            if (isset($param[$key])) {
+                unset($param[$key]);
+            }
+        }
+
+        return $param;
+	}
+	
+	/**
+     * 生成请求令牌
+     * @access public
+     * @param  string $name 令牌名称
+     * @param  mixed  $type 令牌生成方法
+     * @return string
+     */
+    public function token($name = '__token__', $type = null)
+    {
+        $type  = is_callable($type) ? $type : 'md5';
+        $token = call_user_func($type, $this->server('REQUEST_TIME_FLOAT'));
+
+        if ($this->isAjax()) {
+            header($name . ': ' . $token);
+        }
+
+        Session::set($name, $token);
+
+        return $token;
+    }
+
+    /**
+     * 当前是否ssl
+     * @access public
+     * @return bool
+     */
+    public function isSsl()
+    {
+        if ($this->server('HTTPS') && ('1' == $this->server('HTTPS') || 'on' == strtolower($this->server('HTTPS')))) {
+            return true;
+        } elseif ('https' == $this->server('REQUEST_SCHEME')) {
+            return true;
+        } elseif ('443' == $this->server('SERVER_PORT')) {
+            return true;
+        } elseif ('https' == $this->server('HTTP_X_FORWARDED_PROTO')) {
+            return true;
+        } elseif ($this->config['https_agent_name'] && $this->server($this->config['https_agent_name'])) {
+            return true;
+        }
+
+        return false;
     }
 
 
