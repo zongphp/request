@@ -121,7 +121,13 @@ class Base {
      * 全局过滤规则
      * @var array
      */
-	protected $filter;
+    protected $filter;
+    
+    /**
+     * 当前执行的文件
+     * @var string
+     */
+    protected $baseFile;
 
 	/**
      * 是否合并Param
@@ -219,6 +225,86 @@ class Base {
         $result           = $this->param($this->config['var_pjax']) ? true : $result;
         $this->mergeParam = false;
         return $result;
+    }
+
+    /**
+     * 是否为GET请求
+     * @access public
+     * @return bool
+     */
+    public function isGet()
+    {
+        return $this->method() == 'GET';
+    }
+
+    /**
+     * 是否为POST请求
+     * @access public
+     * @return bool
+     */
+    public function isPost()
+    {
+        return $this->method() == 'POST';
+    }
+
+    /**
+     * 是否为PUT请求
+     * @access public
+     * @return bool
+     */
+    public function isPut()
+    {
+        return $this->method() == 'PUT';
+    }
+
+    /**
+     * 是否为DELTE请求
+     * @access public
+     * @return bool
+     */
+    public function isDelete()
+    {
+        return $this->method() == 'DELETE';
+    }
+
+    /**
+     * 是否为HEAD请求
+     * @access public
+     * @return bool
+     */
+    public function isHead()
+    {
+        return $this->method() == 'HEAD';
+    }
+
+    /**
+     * 是否为PATCH请求
+     * @access public
+     * @return bool
+     */
+    public function isPatch()
+    {
+        return $this->method() == 'PATCH';
+    }
+
+    /**
+     * 是否为OPTIONS请求
+     * @access public
+     * @return bool
+     */
+    public function isOptions()
+    {
+        return $this->method() == 'OPTIONS';
+    }
+
+    /**
+     * 是否为cli
+     * @access public
+     * @return bool
+     */
+    public function isCli()
+    {
+        return PHP_SAPI == 'cli';
     }
 
 	/**
@@ -529,7 +615,37 @@ class Base {
             return [];
         }
 	}
-	
+    
+    /**
+     * 设置或获取当前执行的文件 SCRIPT_NAME
+     * @access public
+     * @param  bool     $domain 是否包含域名
+     * @return string|$this
+     */
+    public function baseFile($domain = false)
+    {
+        if (!$this->baseFile) {
+            $url = '';
+            if (!$this->isCli()) {
+                $script_name = basename($this->server('SCRIPT_FILENAME'));
+                if (basename($this->server('SCRIPT_NAME')) === $script_name) {
+                    $url = $this->server('SCRIPT_NAME');
+                } elseif (basename($this->server('PHP_SELF')) === $script_name) {
+                    $url = $this->server('PHP_SELF');
+                } elseif (basename($this->server('ORIG_SCRIPT_NAME')) === $script_name) {
+                    $url = $this->server('ORIG_SCRIPT_NAME');
+                } elseif (($pos = strpos($this->server('PHP_SELF'), '/' . $script_name)) !== false) {
+                    $url = substr($this->server('SCRIPT_NAME'), 0, $pos) . '/' . $script_name;
+                } elseif ($this->server('DOCUMENT_ROOT') && strpos($this->server('SCRIPT_FILENAME'), $this->server('DOCUMENT_ROOT')) === 0) {
+                    $url = str_replace('\\', '/', str_replace($this->server('DOCUMENT_ROOT'), '', $this->server('SCRIPT_FILENAME')));
+                }
+            }
+            $this->baseFile = $url;
+        }
+
+        return $domain ? $this->domain() . $this->baseFile : $this->baseFile;
+    }
+
 	/**
      * 设置或者获取当前请求的content
      * @access public
