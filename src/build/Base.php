@@ -1199,7 +1199,7 @@ class Base {
 
         $msg = $fileUploadErrors[$error];
 
-        throw new \app\base\system\Exception($msg);
+        throw new \zongphp\exception\Exception($msg);
     }
 	
 	/**
